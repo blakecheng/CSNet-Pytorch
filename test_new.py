@@ -4,15 +4,16 @@ from torch.autograd import Variable
 import numpy as np
 import time, math, glob
 import scipy.io as sio
-from lib.network import CSNet
+from lib.network import CSNet,CSNet_Enhanced
 
 
 parser = argparse.ArgumentParser(description="PyTorch LapSRN Eval")
 parser.add_argument("--cuda", action="store_true", help="use cuda?")
-parser.add_argument("--model", default="epochs_subrate_0.1_blocksize_32/net_epoch_195_0.001642.pth", type=str, help="model path")
+parser.add_argument("--model", default="/home/chengbin/project/CSNet-Pytorch/epochs_subrate_0.5_blocksize_32/net_epoch_300_0.000396.pth", type=str, help="model path")
 parser.add_argument("--dataset", default="Test/Set5_mat", type=str, help="dataset name, Default: Set5")
 parser.add_argument('--block_size', default=32, type=int, help='CS block size')
 parser.add_argument('--sub_rate', default=0.1, type=float, help='sampling sub rate')
+parser.add_argument('--mt',default='CSNet')
 
 
 def PSNR(pred, gt, shave_border=0):
@@ -31,7 +32,10 @@ cuda = opt.cuda
 if cuda and not torch.cuda.is_available():
     raise Exception("No GPU found, please run without --cuda")
 
-model = CSNet(opt.block_size, opt.sub_rate)
+if opt.model == "CSNet":
+    model = CSNet(opt.block_size, opt.sub_rate)
+else:
+    model = CSNet_Enhanced(opt.block_size, opt.sub_rate)
 
 if opt.model != '':
     model.load_state_dict(torch.load(opt.model))

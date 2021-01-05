@@ -3,7 +3,7 @@ import torch.utils.data as Data
 import torchvision
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from lib.network import CSNet
+from lib.network import CSNet_Enhanced
 from torch import nn
 import time
 import os
@@ -40,7 +40,7 @@ LOAD_EPOCH = 0
 train_set = TrainDatasetFromFolder('/home/chengbin/data/images/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
 train_loader = DataLoader(dataset=train_set, num_workers=4, batch_size=opt.batchSize, shuffle=True)
 
-net = CSNet(BLOCK_SIZE, opt.sub_rate)
+net = CSNet_Enhanced(BLOCK_SIZE, opt.sub_rate)
 
 mse_loss = nn.MSELoss()
 
@@ -88,7 +88,7 @@ for epoch in range(LOAD_EPOCH, NUM_EPOCHS + 1):
             epoch, running_results['g_loss'] / running_results['batch_sizes'], optimizer.param_groups[0]['lr']))
 
     # for saving model
-    save_dir = 'epochs' + '_subrate_' + str(opt.sub_rate) + '_blocksize_' + str(BLOCK_SIZE)
+    save_dir = 'experiment/csnet_enhance/epochs' + '_subrate_' + str(opt.sub_rate) + '_blocksize_' + str(BLOCK_SIZE)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     if epoch % 5 == 0:

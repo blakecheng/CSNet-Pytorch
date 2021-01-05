@@ -3,7 +3,7 @@ import torch.utils.data as Data
 import torchvision
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from lib.network import CSNet
+from lib.Hierarchical_network import HierarchicalCSNet
 from torch import nn
 import time
 import os
@@ -28,21 +28,51 @@ parser.add_argument('--sub_rate', default=0.1, type=float, help='sampling sub ra
 parser.add_argument('--loadEpoch', default=0, type=int, help='load epoch number')
 parser.add_argument('--generatorWeights', type=str, default='', help="path to CSNet weights (to continue training)")
 
+parser.add_argument('--group_num', type=int, default=4, help="path to CSNet weights (to continue training)")
+parser.add_argument('--loss_mode', type=str, default='normal', help="path to CSNet weights (to continue training)")
+parser.add_argument('--fusion_mode',type=str, default='concate', help="path to CSNet weights (to continue training)")
+
 opt = parser.parse_args()
 
 CROP_SIZE = opt.crop_size
 BLOCK_SIZE = opt.block_size
 NUM_EPOCHS = opt.num_epochs
 PRE_EPOCHS = opt.pre_epochs
+GROUP_NUM = opt.group_num
+LOSS_MODE = opt.loss_mode
+FUSION_MODE = opt.fusion_mode
 LOAD_EPOCH = 0
 
 
 train_set = TrainDatasetFromFolder('/home/chengbin/data/images/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
 train_loader = DataLoader(dataset=train_set, num_workers=4, batch_size=opt.batchSize, shuffle=True)
 
-net = CSNet(BLOCK_SIZE, opt.sub_rate)
+net = HierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mode=FUSION_MODE)
 
-mse_loss = nn.MSELoss()
+class MSELoss(nn.Module):
+    def __init__(self,mode="normal",group_num=8):
+        super(MSELoss, self).__init__()
+        self.mse = nn.MSELoss()
+        self.mode = mode
+        self.group_num = group_num
+        if mode=="weight":
+            self.weights = [2*(i+1)/float(group_num*(group_num+1)) for i in range(group_num)]
+        else:
+            self.weights = [1/float(group_num) for i in range(group_num)]
+    
+    def forward(self,fake_imgs,real_img):
+        if self.mode == "id":
+            loss = self.weights[-1]*self.mse(fake_imgs[-1],real_img)
+            for i in range(self.group_num-1):
+                loss += self.weights[i]*self.mse(fake_imgs[i],fake_imgs[i+1])
+        else:
+            loss = 0
+            for weight, fake_img in zip(self.weights,fake_imgs):
+                loss += weight*self.mse(fake_img,real_img)
+        
+        return loss
+
+mse_loss = MSELoss(mode=LOSS_MODE,group_num=GROUP_NUM)
 
 if opt.generatorWeights != '':
     net.load_state_dict(torch.load(opt.generatorWeights))
@@ -91,7 +121,7 @@ for epoch in range(LOAD_EPOCH, NUM_EPOCHS + 1):
     save_dir = 'epochs' + '_subrate_' + str(opt.sub_rate) + '_blocksize_' + str(BLOCK_SIZE)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    if epoch % 5 == 0:
+    if epoch % 1 == 0:
         save_name = save_dir + '/net_epoch_%d_%6f.pth' % (epoch, running_results['g_loss']/running_results['batch_sizes'])
         torch.save(net.state_dict(), save_name)
-        os.system("python test.py --NetWeight %s"%(save_name))
+        os.system("python test_new.py --NetWeight %s"%(save_name))

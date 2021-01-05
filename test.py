@@ -29,7 +29,7 @@ opt = parser.parse_args()
 
 BLOCK_SIZE = opt.block_size
 
-val_set = TestDatasetFromFolder('/media/gdh-95/data/Set14', blocksize=BLOCK_SIZE)
+val_set = TestDatasetFromFolder('/home/chengbin/data/images/set14_crop', blocksize=BLOCK_SIZE)
 val_loader = DataLoader(dataset=val_set, num_workers=4, batch_size=1, shuffle=False)
 
 net = CSNet(BLOCK_SIZE, opt.sub_rate)
