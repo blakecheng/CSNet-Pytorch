@@ -162,9 +162,9 @@ class HierarchicalBlock(nn.Module):
         elif mode == "spade_res":
             FusionBlock = Fusion_spade_residual
         elif mode == "add":
-            FusionBlock = Fusion_add_residual
-        elif mode == "add_res":
             FusionBlock = Fusion_add
+        elif mode == "add_res":
+            FusionBlock = Fusion_add_residual
 
         
         self.fusion_block = FusionBlock()
@@ -201,7 +201,7 @@ class Fusion_add_residual(nn.Module):
             nn.Conv2d(2*in_chan, 2*in_chan, kernel_size=3, padding=1),
             nn.PReLU()
         )
-        self.norm_concate = nn.BatchNorm2d(in_chan)
+        self.norm_concate = nn.BatchNorm2d(2*in_chan)
         self.conv2 = nn.Sequential(
             nn.Conv2d(2*in_chan, in_chan, kernel_size=3, padding=1),
             nn.PReLU()
@@ -213,8 +213,7 @@ class Fusion_add_residual(nn.Module):
         resx = self.activation(resx)
         resy = self.normy(y)
         resy = self.activation(resy)
-        res = self.conv(torch.cat((resx,resy),dim=1))
-        res = self.conv1(res)
+        res = self.conv1(torch.cat((resx,resy),dim=1))
         res = self.norm_concate(res)
         res = self.activation(res)
         res = self.conv2(res)
