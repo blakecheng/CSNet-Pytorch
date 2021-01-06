@@ -8,7 +8,7 @@ from lib.network import CSNet,CSNet_Enhanced
 from lib.Hierarchical_network import HierarchicalCSNet
 
 parser = argparse.ArgumentParser(description="PyTorch LapSRN Eval")
-parser.add_argument("--cuda", action="store_true", help="use cuda?")
+# parser.add_argument("--cuda", action="store_true", help="use cuda?")
 parser.add_argument("--model", default="/home/chengbin/project/CSNet-Pytorch/epochs_subrate_0.5_blocksize_32/net_epoch_300_0.000396.pth", type=str, help="model path")
 parser.add_argument("--dataset", default="Test/Set5_mat", type=str, help="dataset name, Default: Set5")
 parser.add_argument('--block_size', default=32, type=int, help='CS block size')
@@ -27,10 +27,10 @@ def PSNR(pred, gt, shave_border=0):
     return 20 * math.log10(255.0 / rmse)
 
 opt = parser.parse_args()
-cuda = opt.cuda
+cuda = torch.cuda.is_available()
 
-if cuda and not torch.cuda.is_available():
-    raise Exception("No GPU found, please run without --cuda")
+# if cuda and not torch.cuda.is_available():
+#     raise Exception("No GPU found, please run without --cuda")
 
 if opt.model == "CSNet":
     model = CSNet(opt.block_size, opt.sub_rate)

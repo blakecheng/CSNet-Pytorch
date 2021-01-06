@@ -33,6 +33,7 @@ parser.add_argument('--group_num', type=int, default=5, help="path to CSNet weig
 parser.add_argument('--loss_mode', type=str, default='normal', help="path to CSNet weights (to continue training)")
 parser.add_argument('--fusion_mode',type=str, default='concate', help="path to CSNet weights (to continue training)")
 
+
 opt = parser.parse_args()
 
 CROP_SIZE = opt.crop_size
@@ -45,7 +46,7 @@ FUSION_MODE = opt.fusion_mode
 LOAD_EPOCH = 0
 
 
-save_dir = 'experiment/hirerachical/epochs' + '_subrate_' + str(opt.sub_rate) + '_blocksize_' + str(BLOCK_SIZE)
+save_dir = '../experiment/hirerachical/epochs' + '_subrate_' + str(opt.sub_rate) + '_blocksize_' + str(BLOCK_SIZE)
 argv=sys.argv[1:]
 for arg in argv:
     if arg in "--group_num":
@@ -55,8 +56,8 @@ for arg in argv:
     if arg in "--fusion_mode":
         save_dir = save_dir+"_%s"%(opt.fusion_mode)
 
-train_set = TrainDatasetFromFolder('/opt/mnt/cb/project/data/dataset/images/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
-train_loader = DataLoader(dataset=train_set, num_workers=4, batch_size=opt.batchSize, shuffle=True)
+train_set = TrainDatasetFromFolder('data/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
+train_loader = DataLoader(dataset=train_set, num_workers=16, batch_size=opt.batchSize, shuffle=True)
 
 net = HierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mode=FUSION_MODE)
 
@@ -129,13 +130,16 @@ for epoch in range(LOAD_EPOCH, NUM_EPOCHS + 1):
 
         train_bar.set_description(desc='[%d] Loss_G: %.4f lr: %.7f' % (
             epoch, running_results['g_loss'] / running_results['batch_sizes'], optimizer.param_groups[0]['lr']))
-
-    # for saving model
     
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    if epoch % 5 == 0:
+
+    if epoch % 1 == 0:
         save_name = save_dir + '/net_epoch_%d_%6f.pth' % (epoch, running_results['g_loss']/running_results['batch_sizes'])
         torch.save(net.state_dict(), save_name)
         torch.save(opt, save_dir+"/opt.pt")
         os.system("python test_h.py --model %s"%(save_name))
+
+    # for saving model
+    
+

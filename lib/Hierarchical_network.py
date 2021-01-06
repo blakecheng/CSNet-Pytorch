@@ -127,6 +127,31 @@ class ToOutput(nn.Module):
         block5 = self.conv5(block4)
         return block5
 
+class Variance_estimation(nn.Module):
+    def __init__(self):
+        super(Variance_estimation)
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.conv5 = nn.Conv2d(64, 1, kernel_size=3, padding=1)
+    
+    def forward(self,x,y):
+        block2 = self.conv2(torch.cat((x,y),dim=1))
+        block3 = self.conv3(block2)
+        block4 = self.conv4(block3)
+        block5 = self.conv5(block4)
+        return block5
+
+
 class HierarchicalBlock(nn.Module):
     def __init__(self,mode="concate"):
         super(HierarchicalBlock, self).__init__()
@@ -134,6 +159,13 @@ class HierarchicalBlock(nn.Module):
             FusionBlock = Fusion_concate
         elif mode == "spade":
             FusionBlock = Fusion_spade
+        elif mode == "spade_res":
+            FusionBlock = Fusion_spade_residual
+        elif mode == "add":
+            FusionBlock = Fusion_add_residual
+        elif mode == "add_res":
+            FusionBlock = Fusion_add
+
         
         self.fusion_block = FusionBlock()
     
@@ -152,6 +184,44 @@ class Fusion_concate(nn.Module):
     def forward(self,x,y):
         return self.conv(torch.cat((x,y),dim=1))
 
+class Fusion_add(nn.Module):
+    def __init__(self):
+        super(Fusion_add, self).__init__()
+
+    def forward(self,x,y):
+        return torch.add(x, y)
+
+class Fusion_add_residual(nn.Module):
+    def __init__(self,in_chan=64):
+        super(Fusion_add_residual, self).__init__()
+        self.normx = nn.BatchNorm2d(in_chan)
+        self.normy = nn.BatchNorm2d(in_chan)
+        self.activation = nn.PReLU()
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(2*in_chan, 2*in_chan, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.norm_concate = nn.BatchNorm2d(in_chan)
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(2*in_chan, in_chan, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        
+    def forward(self,x,y):
+        identity_map = x
+        resx = self.normx(x)
+        resx = self.activation(resx)
+        resy = self.normy(y)
+        resy = self.activation(resy)
+        res = self.conv(torch.cat((resx,resy),dim=1))
+        res = self.conv1(res)
+        res = self.norm_concate(res)
+        res = self.activation(res)
+        res = self.conv2(res)
+        return torch.add(x,res)
+
+
+
 class Fusion_spade(nn.Module):
     def __init__(self,in_chan=64,num_filters=64):
         super(Fusion_spade, self).__init__()
@@ -167,11 +237,99 @@ class Fusion_spade(nn.Module):
         x = x*(1+seg_gamma) + seg_beta
         return x
 
+class Fusion_spade_residual(nn.Module):
+    def __init__(self,in_chan=64,num_filters=64,kernel_size=3, stride=1):
+        super(Fusion_spade_residual, self).__init__()
+        self.activation = nn.PReLU()
+        pad_size = int((kernel_size-1)/2)
+        self.pad = nn.ReflectionPad2d(pad_size)
+        self.conv1 = nn.Conv2d(in_chan, num_filters, kernel_size, stride=stride)
+        self.conv2 = nn.Conv2d(in_chan, num_filters, kernel_size, stride=stride)
+        self.norm1 = nn.BatchNorm2d(in_chan)
+        self.norm2 = nn.BatchNorm2d(in_chan)
+        self.spade1 = Fusion_spade()
+        self.spade2 = Fusion_spade()
+    
+    def forward(self,x,style):
+        identity_map = x
+        res = self.pad(x)
+        res = self.conv1(res)
+        res = self.norm1(res)
+        res = self.spade1(res,style)
+        res = self.activation(res)
+
+        res = self.pad(res)
+        res = self.conv2(res)
+        res = self.norm2(res)
+        res = self.spade2(res,style)
+
+        return torch.add(res, identity_map)
+
 #  code of CSNet
 class HierarchicalCSNet(nn.Module):
     def __init__(self, blocksize=32, subrate=0.1, group_num=8,mode="concate",shared_head=False,shared_tail=False):
 
         super(HierarchicalCSNet, self).__init__()
+        self.blocksize = blocksize
+        self.group_num = group_num
+        # for sampling
+        self.sampling = SamplingModule(group_num=group_num,sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),blocksize=blocksize)
+        # self.sampling = nn.Conv2d(1, int(np.round(blocksize*blocksize*subrate)), blocksize, stride=blocksize, padding=0, bias=False)
+        # upsampling
+        # self.upsampling = nn.Conv2d(int(np.round(blocksize*blocksize*subrate)), blocksize*blocksize, 1, stride=1, padding=0)
+        if shared_head == False:
+            for m in range(group_num):
+                headblock = HeadBlock(
+                    sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),
+                    out_channel = blocksize*blocksize,
+                    blocksize = blocksize
+                )
+                self.add_module(f'head_{str(m)}', headblock)
+        else:
+            headblock = HeadBlock(
+                    sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),
+                    out_channel = blocksize*blocksize,
+                    blocksize = blocksize
+                )
+            for m in range(group_num):
+                self.add_module(f'head_{str(m)}', headblock)
+        
+
+        for m in range(group_num-1):
+            hierarchicalblock = HierarchicalBlock(mode=mode)
+            self.add_module(f'hierarchicalblock_{str(m)}', hierarchicalblock)
+        
+        if shared_tail == False:
+            for m in range(group_num):
+                tailblock = ToOutput()
+                self.add_module(f'tail_{str(m)}', tailblock)
+        else:
+            tailblock = ToOutput()
+            for m in range(group_num):
+                self.add_module(f'tail_{str(m)}', tailblock)
+
+
+    def forward(self, x):
+        y = self.sampling(x)
+        headlist = []
+        for m in range(self.group_num):
+            headlist.append(getattr(self, f'head_{str(m)}')(y[m]))
+
+        resultlist = []
+        x = headlist[0]
+        resultlist.append(getattr(self, f'tail_{str(0)}')(x))
+        for m in range(self.group_num-1):
+            x = getattr(self, f'hierarchicalblock_{str(m)}')(x,headlist[m+1])
+            resultlist.append(getattr(self, f'tail_{str(m+1)}')(x))
+
+        return resultlist
+
+
+
+class IDHierarchicalCSNet(nn.Module):
+    def __init__(self, blocksize=32, subrate=0.1, group_num=8,mode="concate",shared_head=False,shared_tail=False):
+
+        super(IDHierarchicalCSNet, self).__init__()
         self.blocksize = blocksize
         self.group_num = group_num
         # for sampling

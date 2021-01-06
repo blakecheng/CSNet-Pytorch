@@ -50,40 +50,48 @@ image_list = glob.glob(opt.dataset+"/*.*")
 avg_psnr_predicted_list = [0.0 for _ in range(args.group_num)]
 avg_elapsed_time = 0.0
 
-for image_name in image_list:
-    print("Processing ", image_name)
-    im_gt_y = sio.loadmat(image_name)['im_gt_y']
+with torch.no_grad():
+    for image_name in image_list:
+        print("Processing ", image_name)
+        im_gt_y = sio.loadmat(image_name)['im_gt_y']
 
-    im_gt_y = im_gt_y.astype(float)
+        im_gt_y = im_gt_y.astype(float)
 
-    im_input = im_gt_y/255.
+        im_input = im_gt_y/255.
 
-    im_input = Variable(torch.from_numpy(im_input).float()).view(1, -1, im_input.shape[0], im_input.shape[1])
+        im_input = Variable(torch.from_numpy(im_input).float()).view(1, -1, im_input.shape[0], im_input.shape[1])
 
-    if cuda:
-        model = model.cuda()
-        im_input = im_input.cuda()
-    else:
-        model = model.cpu()
+        if cuda:
+            model = model.cuda()
+            im_input = im_input.cuda()
+        else:
+            model = model.cpu()
 
-    start_time = time.time()
-    res_list = model(im_input)
-    elapsed_time = time.time() - start_time
-    avg_elapsed_time += elapsed_time
+        start_time = time.time()
+        res_list = model(im_input)
+        elapsed_time = time.time() - start_time
+        avg_elapsed_time += elapsed_time
 
-    for i in range(args.group_num):
-        res = res_list[i].cpu()
-        im_res_y = res.data[0].numpy().astype(np.float32)
+        for i in range(args.group_num):
+            res = res_list[i].cpu()
+            im_res_y = res.data[0].numpy().astype(np.float32)
 
-        im_res_y = im_res_y*255.
-        im_res_y[im_res_y<0] = 0
-        im_res_y[im_res_y>255.] = 255.
-        im_res_y = im_res_y[0,:,:]
+            im_res_y = im_res_y*255.
+            im_res_y[im_res_y<0] = 0
+            im_res_y[im_res_y>255.] = 255.
+            im_res_y = im_res_y[0,:,:]
 
-        psnr_predicted = PSNR(im_gt_y, im_res_y,shave_border=0)
-        print(psnr_predicted)
-        avg_psnr_predicted_list[i] += psnr_predicted
+            psnr_predicted = PSNR(im_gt_y, im_res_y,shave_border=0)
+            print(psnr_predicted)
+            avg_psnr_predicted_list[i] += psnr_predicted
 
-print("Dataset=", opt.dataset)
-print("PSNR_predicted=", [avg_psnr_predicted/len(image_list) for avg_psnr_predicted in avg_psnr_predicted_list])
-print("It takes average {}s for processing".format(avg_elapsed_time/len(image_list)))
+    print("Dataset=", opt.dataset)
+    PSNR_RESULT = [avg_psnr_predicted/len(image_list) for avg_psnr_predicted in avg_psnr_predicted_list]
+    save_path = opt.model[:-4]+"_result.txt"
+    fileObject = open(save_path, 'w')
+    for ip in PSNR_RESULT:
+        fileObject.write(str(ip))
+        fileObject.write('\n')
+    fileObject.close()
+    print("PSNR_predicted=",PSNR_RESULT)
+    print("It takes average {}s for processing".format(avg_elapsed_time/len(image_list)))
