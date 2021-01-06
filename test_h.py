@@ -5,15 +5,16 @@ import numpy as np
 import time, math, glob
 import scipy.io as sio
 from lib.network import CSNet,CSNet_Enhanced
+import os
 from lib.Hierarchical_network import HierarchicalCSNet
 
 parser = argparse.ArgumentParser(description="PyTorch LapSRN Eval")
-parser.add_argument("--cuda", action="store_true", help="use cuda?")
-parser.add_argument("--model", default="/home/chengbin/project/CSNet-Pytorch/epochs_subrate_0.5_blocksize_32/net_epoch_300_0.000396.pth", type=str, help="model path")
+# parser.add_argument("--cuda", action="store_true", help="use cuda?")
+parser.add_argument("--model", default="experiment/hirerachical/epochs_subrate_0.1_blocksize_32/net_epoch_0_0.014720.pth", type=str, help="model path")
 parser.add_argument("--dataset", default="Test/Set5_mat", type=str, help="dataset name, Default: Set5")
-parser.add_argument('--block_size', default=32, type=int, help='CS block size')
-parser.add_argument('--sub_rate', default=0.1, type=float, help='sampling sub rate')
-parser.add_argument('--mt',default='CSNet')
+# parser.add_argument('--block_size', default=32, type=int, help='CS block size')
+# parser.add_argument('--sub_rate', default=0.1, type=float, help='sampling sub rate')
+parser.add_argument('--mt',default='HierarchicalCSNet')
 
 
 def PSNR(pred, gt, shave_border=0):
@@ -27,23 +28,26 @@ def PSNR(pred, gt, shave_border=0):
     return 20 * math.log10(255.0 / rmse)
 
 opt = parser.parse_args()
-cuda = opt.cuda
+cuda = torch.cuda.is_available()
 
-if cuda and not torch.cuda.is_available():
-    raise Exception("No GPU found, please run without --cuda")
 
-if opt.model == "CSNet":
-    model = CSNet(opt.block_size, opt.sub_rate)
-else:
-    model = CSNet_Enhanced(opt.block_size, opt.sub_rate)
 
-if opt.model != '':
-    model.load_state_dict(torch.load(opt.model))
+# if cuda and not torch.cuda.is_available():
+#     raise Exception("No GPU found, please run without --cuda")
+
+
+if opt.mt == "HierarchicalCSNet":
+    args = torch.load(os.path.split(opt.model)[0]+"/opt.pt")
+    model = HierarchicalCSNet(args.block_size, args.sub_rate,group_num=args.group_num,mode=args.fusion_mode)
+
+
+
+model.load_state_dict(torch.load(opt.model))
 
 
 image_list = glob.glob(opt.dataset+"/*.*") 
 
-avg_psnr_predicted = 0.0
+avg_psnr_predicted_list = [0.0 for _ in range(args.group_num)]
 avg_elapsed_time = 0.0
 
 for image_name in image_list:
@@ -63,23 +67,23 @@ for image_name in image_list:
         model = model.cpu()
 
     start_time = time.time()
-    res = model(im_input)
+    res_list = model(im_input)
     elapsed_time = time.time() - start_time
     avg_elapsed_time += elapsed_time
 
-    res = res.cpu()
+    for i in range(args.group_num):
+        res = res_list[i].cpu()
+        im_res_y = res.data[0].numpy().astype(np.float32)
 
-    im_res_y = res.data[0].numpy().astype(np.float32)
+        im_res_y = im_res_y*255.
+        im_res_y[im_res_y<0] = 0
+        im_res_y[im_res_y>255.] = 255.
+        im_res_y = im_res_y[0,:,:]
 
-    im_res_y = im_res_y*255.
-    im_res_y[im_res_y<0] = 0
-    im_res_y[im_res_y>255.] = 255.
-    im_res_y = im_res_y[0,:,:]
-
-    psnr_predicted = PSNR(im_gt_y, im_res_y,shave_border=0)
-    print(psnr_predicted)
-    avg_psnr_predicted += psnr_predicted
+        psnr_predicted = PSNR(im_gt_y, im_res_y,shave_border=0)
+        print(psnr_predicted)
+        avg_psnr_predicted_list[i] += psnr_predicted
 
 print("Dataset=", opt.dataset)
-print("PSNR_predicted=", avg_psnr_predicted/len(image_list))
+print("PSNR_predicted=", [avg_psnr_predicted/len(image_list) for avg_psnr_predicted in avg_psnr_predicted_list])
 print("It takes average {}s for processing".format(avg_elapsed_time/len(image_list)))
