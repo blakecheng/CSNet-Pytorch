@@ -127,11 +127,13 @@ class ToOutput(nn.Module):
         block5 = self.conv5(block4)
         return block5
 
-class Variance_estimation(nn.Module):
-    def __init__(self):
-        super(Variance_estimation)
+class Variance_estimation_block(nn.Module):
+    def __init__(self,mode="concate"):
+        super(Variance_estimation_block, self).__init__()
+        
+        self.fusion_block=HierarchicalBlock(mode=mode)
         self.conv2 = nn.Sequential(
-            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.PReLU()
         )
         self.conv3 = nn.Sequential(
@@ -145,7 +147,8 @@ class Variance_estimation(nn.Module):
         self.conv5 = nn.Conv2d(64, 1, kernel_size=3, padding=1)
     
     def forward(self,x,y):
-        block2 = self.conv2(torch.cat((x,y),dim=1))
+        block1 = self.fusion_block(x,y)
+        block2 = self.conv2(block1)
         block3 = self.conv3(block2)
         block4 = self.conv4(block3)
         block5 = self.conv5(block4)
@@ -266,7 +269,7 @@ class Fusion_spade_residual(nn.Module):
 
 #  code of CSNet
 class HierarchicalCSNet(nn.Module):
-    def __init__(self, blocksize=32, subrate=0.1, group_num=8,mode="concate",shared_head=False,shared_tail=False):
+    def __init__(self, blocksize=32, subrate=0.1, group_num=8,mode="concate",shared_head=False,shared_tail=False,variance_estimation=False):
 
         super(HierarchicalCSNet, self).__init__()
         self.blocksize = blocksize
@@ -297,6 +300,12 @@ class HierarchicalCSNet(nn.Module):
         for m in range(group_num-1):
             hierarchicalblock = HierarchicalBlock(mode=mode)
             self.add_module(f'hierarchicalblock_{str(m)}', hierarchicalblock)
+
+        self.variance_estimation = variance_estimation
+        if variance_estimation == True:
+            for m in range(group_num-1):
+                varianceestimationblock = Variance_estimation_block(mode=mode)
+                self.add_module(f'varianceestimationblock_{str(m)}', varianceestimationblock)
         
         if shared_tail == False:
             for m in range(group_num):
@@ -317,68 +326,17 @@ class HierarchicalCSNet(nn.Module):
         resultlist = []
         x = headlist[0]
         resultlist.append(getattr(self, f'tail_{str(0)}')(x))
+
+        if self.variance_estimation == True:
+            variance_estimation_list = []
+
         for m in range(self.group_num-1):
             x = getattr(self, f'hierarchicalblock_{str(m)}')(x,headlist[m+1])
+            if self.variance_estimation == True:
+                variance_estimation_list.append(getattr(self, f'varianceestimationblock_{str(m)}')(x,headlist[m+1]))
             resultlist.append(getattr(self, f'tail_{str(m+1)}')(x))
 
-        return resultlist
-
-
-
-class IDHierarchicalCSNet(nn.Module):
-    def __init__(self, blocksize=32, subrate=0.1, group_num=8,mode="concate",shared_head=False,shared_tail=False):
-
-        super(IDHierarchicalCSNet, self).__init__()
-        self.blocksize = blocksize
-        self.group_num = group_num
-        # for sampling
-        self.sampling = SamplingModule(group_num=group_num,sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),blocksize=blocksize)
-        # self.sampling = nn.Conv2d(1, int(np.round(blocksize*blocksize*subrate)), blocksize, stride=blocksize, padding=0, bias=False)
-        # upsampling
-        # self.upsampling = nn.Conv2d(int(np.round(blocksize*blocksize*subrate)), blocksize*blocksize, 1, stride=1, padding=0)
-        if shared_head == False:
-            for m in range(group_num):
-                headblock = HeadBlock(
-                    sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),
-                    out_channel = blocksize*blocksize,
-                    blocksize = blocksize
-                )
-                self.add_module(f'head_{str(m)}', headblock)
+        if self.variance_estimation == True:
+            return resultlist, variance_estimation_list
         else:
-            headblock = HeadBlock(
-                    sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),
-                    out_channel = blocksize*blocksize,
-                    blocksize = blocksize
-                )
-            for m in range(group_num):
-                self.add_module(f'head_{str(m)}', headblock)
-        
-
-        for m in range(group_num-1):
-            hierarchicalblock = HierarchicalBlock(mode=mode)
-            self.add_module(f'hierarchicalblock_{str(m)}', hierarchicalblock)
-        
-        if shared_tail == False:
-            for m in range(group_num):
-                tailblock = ToOutput()
-                self.add_module(f'tail_{str(m)}', tailblock)
-        else:
-            tailblock = ToOutput()
-            for m in range(group_num):
-                self.add_module(f'tail_{str(m)}', tailblock)
-
-
-    def forward(self, x):
-        y = self.sampling(x)
-        headlist = []
-        for m in range(self.group_num):
-            headlist.append(getattr(self, f'head_{str(m)}')(y[m]))
-
-        resultlist = []
-        x = headlist[0]
-        resultlist.append(getattr(self, f'tail_{str(0)}')(x))
-        for m in range(self.group_num-1):
-            x = getattr(self, f'hierarchicalblock_{str(m)}')(x,headlist[m+1])
-            resultlist.append(getattr(self, f'tail_{str(m+1)}')(x))
-
-        return resultlist
+            return resultlist

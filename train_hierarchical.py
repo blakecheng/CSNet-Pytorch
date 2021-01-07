@@ -34,6 +34,8 @@ parser.add_argument('--loss_mode', type=str, default='normal', help="path to CSN
 parser.add_argument('--fusion_mode',type=str, default='concate', help="path to CSNet weights (to continue training)")
 
 
+
+
 opt = parser.parse_args()
 
 CROP_SIZE = opt.crop_size
@@ -59,7 +61,8 @@ for arg in argv:
 train_set = TrainDatasetFromFolder('data/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
 train_loader = DataLoader(dataset=train_set, num_workers=16, batch_size=opt.batchSize, shuffle=True)
 
-net = HierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mode=FUSION_MODE)
+use_variance_estimation = (opt.loss_mode == "id_variance")
+net = HierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mode=FUSION_MODE,variance_estimation=use_variance_estimation)
 
 class MSELoss(nn.Module):
     def __init__(self,mode="normal",group_num=8):
@@ -69,14 +72,25 @@ class MSELoss(nn.Module):
         self.group_num = group_num
         if mode=="weight":
             self.weights = [2*(i+1)/float(group_num*(group_num+1)) for i in range(group_num)]
+        elif mode == "id_plus" or mode == "id_stop":
+            self.weights = [2*(i+1)/float(group_num*(group_num+1)) for i in range(group_num)]
         else:
             self.weights = [1/float(group_num) for i in range(group_num)]
     
     def forward(self,fake_imgs,real_img):
-        if self.mode == "id":
+        if self.mode == "id" or self.mode=="id_plus":
             loss = self.weights[-1]*self.mse(fake_imgs[-1],real_img)
             for i in range(self.group_num-1):
                 loss += self.weights[i]*self.mse(fake_imgs[i],fake_imgs[i+1])
+        elif self.mode == "id_stop":
+            loss = self.weights[-1]*self.mse(fake_imgs[-1],real_img)
+            for i in range(self.group_num-1):
+                loss += self.weights[i]*self.mse(fake_imgs[i],fake_imgs[i+1].detach())
+        elif self.mode == "id_variance":
+            result, variance = fake_imgs
+            loss = self.group_num*self.weights[-1]*self.mse(result[-1],real_img)
+            for i in range(self.group_num-1):
+                loss += self.weights[i]*self.mse(result[i]*variance[i],result[i+1].detach()*variance[i])
         else:
             loss = 0
             for weight, fake_img in zip(self.weights,fake_imgs):
