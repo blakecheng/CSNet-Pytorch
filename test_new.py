@@ -32,7 +32,7 @@ cuda = torch.cuda.is_available()
 # if cuda and not torch.cuda.is_available():
 #     raise Exception("No GPU found, please run without --cuda")
 
-if opt.model == "CSNet":
+if opt.mt == "CSNet":
     model = CSNet(opt.block_size, opt.sub_rate)
 else:
     model = CSNet_Enhanced(opt.block_size, opt.sub_rate)

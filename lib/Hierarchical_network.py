@@ -104,7 +104,7 @@ class HeadBlock(nn.Module):
         return block1
 
 class ToOutput(nn.Module):
-    def __init__(self):
+    def __init__(self,in_chan=32):
         super(ToOutput, self).__init__()
         self.conv2 = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
@@ -145,6 +145,7 @@ class Variance_estimation_block(nn.Module):
             nn.PReLU()
         )
         self.conv5 = nn.Conv2d(64, 1, kernel_size=3, padding=1)
+        self.eps = 1e-6
     
     def forward(self,x,y):
         block1 = self.fusion_block(x,y)
@@ -152,7 +153,7 @@ class Variance_estimation_block(nn.Module):
         block3 = self.conv3(block2)
         block4 = self.conv4(block3)
         block5 = self.conv5(block4)
-        return block5
+        return torch.log(1+torch.exp(block5))+self.eps
 
 
 class HierarchicalBlock(nn.Module):
@@ -340,3 +341,29 @@ class HierarchicalCSNet(nn.Module):
             return resultlist, variance_estimation_list
         else:
             return resultlist
+
+
+# The residualblock for reconstruction network
+class ResidualBlock(nn.Module):
+    def __init__(self, channels, has_BN = False):
+        super(ResidualBlock, self).__init__()
+        self.has_BN = has_BN
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        if has_BN:
+            self.bn1 = nn.BatchNorm2d(channels)
+        self.prelu = nn.PReLU()
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        if has_BN:
+            self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        residual = self.conv1(x)
+        if self.has_BN:
+            residual = self.bn1(residual)
+        residual = self.prelu(residual)
+        residual = self.conv2(residual)
+        if self.has_BN:
+            residual = self.bn2(residual)
+
+        return x + residual
+

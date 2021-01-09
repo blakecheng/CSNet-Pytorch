@@ -61,7 +61,7 @@ for arg in argv:
 train_set = TrainDatasetFromFolder('data/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
 train_loader = DataLoader(dataset=train_set, num_workers=16, batch_size=opt.batchSize, shuffle=True)
 
-use_variance_estimation = (opt.loss_mode == "id_variance")
+use_variance_estimation = ("id_variance" in opt.loss_mode)
 net = HierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mode=FUSION_MODE,variance_estimation=use_variance_estimation)
 
 class MSELoss(nn.Module):
@@ -88,9 +88,18 @@ class MSELoss(nn.Module):
                 loss += self.weights[i]*self.mse(fake_imgs[i],fake_imgs[i+1].detach())
         elif self.mode == "id_variance":
             result, variance = fake_imgs
-            loss = self.group_num*self.weights[-1]*self.mse(result[-1],real_img)
+            loss = self.weights[-1]*self.mse(result[-1],real_img)
+            distortion = loss.clone()
             for i in range(self.group_num-1):
-                loss += self.weights[i]*self.mse(result[i]*variance[i],result[i+1].detach()*variance[i])
+                loss += 1e-2*self.weights[i]*(self.mse(0.5*result[i]/variance[i],0.5*real_img.detach()/variance[i])+ 0.5*torch.mean(torch.log(variance[i])))
+            print(loss-distortion,distortion)
+        elif self.mode == "id_variance2":
+            result, variance = fake_imgs
+            loss = self.weights[-1]*self.mse(result[-1],real_img)
+            distortion = loss.clone()
+            for i in range(self.group_num-1):
+                loss += 1e-4*self.weights[i]*(self.mse(0.5*result[i]/variance[i],0.5*result[i+1].detach()/variance[i])+ 0.5*torch.mean(torch.log(variance[i])))
+            print(loss-distortion,distortion)
         else:
             loss = 0
             for weight, fake_img in zip(self.weights,fake_imgs):

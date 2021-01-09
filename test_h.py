@@ -38,7 +38,8 @@ cuda = torch.cuda.is_available()
 
 if opt.mt == "HierarchicalCSNet":
     args = torch.load(os.path.split(opt.model)[0]+"/opt.pt")
-    model = HierarchicalCSNet(args.block_size, args.sub_rate,group_num=args.group_num,mode=args.fusion_mode)
+    use_variance_estimation = ("id_variance" in args.loss_mode)
+    model = HierarchicalCSNet(args.block_size, args.sub_rate,group_num=args.group_num,mode=args.fusion_mode,variance_estimation=use_variance_estimation)
 
 
 
@@ -68,7 +69,10 @@ with torch.no_grad():
             model = model.cpu()
 
         start_time = time.time()
-        res_list = model(im_input)
+        if use_variance_estimation:
+            res_list,var_list = model(im_input)
+        else:
+            res_list = model(im_input)
         elapsed_time = time.time() - start_time
         avg_elapsed_time += elapsed_time
 
