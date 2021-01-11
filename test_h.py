@@ -7,6 +7,7 @@ import scipy.io as sio
 from lib.network import CSNet,CSNet_Enhanced
 import os
 from lib.Hierarchical_network import HierarchicalCSNet
+from lib.variation_hierachical_network import VariationHierarchicalCSNet
 
 parser = argparse.ArgumentParser(description="PyTorch LapSRN Eval")
 # parser.add_argument("--cuda", action="store_true", help="use cuda?")
@@ -40,6 +41,11 @@ if opt.mt == "HierarchicalCSNet":
     args = torch.load(os.path.split(opt.model)[0]+"/opt.pt")
     use_variance_estimation = ("id_variance" in args.loss_mode)
     model = HierarchicalCSNet(args.block_size, args.sub_rate,group_num=args.group_num,mode=args.fusion_mode,variance_estimation=use_variance_estimation)
+elif opt.mt == "VariationHierachicalCSNet":
+    args = torch.load(os.path.split(opt.model)[0]+"/opt.pt")
+    use_variance_estimation=True
+    model = VariationHierarchicalCSNet(args.block_size, args.sub_rate,group_num=args.group_num,mode=args.fusion_mode)
+
 
 
 
