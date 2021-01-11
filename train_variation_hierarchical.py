@@ -92,8 +92,10 @@ class VIDLoss(nn.Module):
             mseloss = self.weights[-1]*self.mse(resultlist[-1],real_img)
             mu_t,logvar_t=sum([latent[0] for latent in latentlist]),sum([latent[1] for latent in latentlist])
             idloss = 0
+            mu,logvar = 0,0
             for i in range(self.group_num-1):
-                mu,logvar = latentlist[i]
+                mu += latentlist[i][0]
+                logvar += latentlist[i][1]
                 idloss += self.compute_kld2(mu,logvar,mu_t,logvar_t)
                 mseloss += self.weights[i]*self.mse(resultlist[i],real_img)/batchsize
                 return mseloss+self.weight*idloss,mseloss,idloss
