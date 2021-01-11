@@ -69,7 +69,7 @@ net = VariationHierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mo
 class VIDLoss(nn.Module):
     def __init__(self,mode="normal",group_num=8,weight=0.0005):
         super(VIDLoss, self).__init__()
-        self.mse = nn.MSELoss(size_average=False)
+        self.mse = nn.MSELoss()
         self.mode = mode
         self.group_num = group_num
         self.weight = weight
@@ -80,25 +80,25 @@ class VIDLoss(nn.Module):
         resultlist, latentlist = fake_imgs
 
         if self.mode == "normal":
-            mseloss = self.mse(resultlist[-1],real_img)/batchsize
+            mseloss = self.mse(resultlist[-1],real_img)
             idloss = 0
             for result, latent in zip(resultlist,latentlist):
                 mu,logvar = latent
-                kldloss = self.compute_kld(mu,logvar)
-                idloss += (kldloss+self.mse(result,real_img))/batchsize
-                mseloss += self.weights*self.mse(result,real_img)/batchsize
+                kldloss = self.compute_kld(mu,logvar)/batchsize
+                idloss += (kldloss+self.mse(result,real_img))
+                mseloss += self.weights*self.mse(result,real_img)
             return mseloss+self.weight*idloss,mseloss,idloss
         elif self.mode == "id":
-            mseloss = self.weights[-1]*self.mse(resultlist[-1],real_img)/batchsize
+            mseloss = self.weights[-1]*self.mse(resultlist[-1],real_img)
             mu_t,logvar_t=sum([latent[0] for latent in latentlist]),sum([latent[1] for latent in latentlist])
             idloss = 0
             for i in range(self.group_num-1):
                 mu,logvar = latentlist[i]
-                idloss += self.compute_kld2(mu,logvar,mu_t,logvar_t)/batchsize
+                idloss += self.compute_kld2(mu,logvar,mu_t,logvar_t)
                 mseloss += self.weights[i]*self.mse(resultlist[i],real_img)/batchsize
                 return mseloss+self.weight*idloss,mseloss,idloss
         elif self.mode == "id2":
-            mseloss = self.mse(resultlist[-1],real_img)/batchsize
+            mseloss = self.mse(resultlist[-1],real_img)
             mu_t,logvar_t=latentlist[-1]
             idloss = 0
             for i in range(self.group_num-1):
