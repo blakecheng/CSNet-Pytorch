@@ -96,8 +96,8 @@ class VIDLoss(nn.Module):
             for i in range(self.group_num-1):
                 mu += latentlist[i][0]
                 logvar += latentlist[i][1]
-                idloss += self.compute_kld2(mu,logvar,mu_t,logvar_t)/batchsizeWW
-                mseloss += self.weights[i]*self.mse(resultlist[i],real_img)
+                idloss += self.compute_kld2(mu,logvar,mu_t,logvar_t)/batchsize
+                mseloss += 0.5*self.mse(resultlist[i],real_img)
                 return mseloss+self.weight*idloss,mseloss,idloss
         elif self.mode == "id2":
             mseloss = self.mse(resultlist[-1],real_img)
