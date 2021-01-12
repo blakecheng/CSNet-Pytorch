@@ -24,7 +24,7 @@ def copy_dataset(obs_path, cache_path):
 
 def get_checkpoint(checkpoint_path, s3chekpoint_path):
     def get_time(i):
-        return 6000
+        return 600
 
     start = time.time()
     if not os.path.exists(checkpoint_path):
