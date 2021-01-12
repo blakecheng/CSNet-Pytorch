@@ -334,7 +334,7 @@ class VariationHierarchicalCSNet(nn.Module):
         resultlist.append(getattr(self, f'tail_{str(0)}')(z))
 
         for m in range(self.group_num-1):
-            mu, log_var = getattr(self, f'encoder_{str(0)}')(headlist[m+1])
+            mu, log_var = getattr(self, f'encoder_{str(m+1)}')(headlist[m+1])
             latentlist.append([mu, log_var])
             z_tmp = self.reparameterize(mu, log_var)
             z = getattr(self, f'hierarchicalblock_{str(m)}')(z,z_tmp)
