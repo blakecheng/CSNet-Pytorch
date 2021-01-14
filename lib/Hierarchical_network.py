@@ -88,12 +88,12 @@ class SamplingModule(nn.Module):
         return samplelist
 
 class HeadBlock(nn.Module):
-    def __init__(self,sample_channel,out_channel,blocksize):
+    def __init__(self,sample_channel,sample_out_channel,blocksize,out_chanel=64):
         super(HeadBlock, self).__init__()
         self.blocksize = blocksize
-        self.upsampling = nn.Conv2d(sample_channel, out_channel, 1, stride=1, padding=0)
+        self.upsampling = nn.Conv2d(sample_channel, sample_out_channel, 1, stride=1, padding=0)
         self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=3, padding=1),
+            nn.Conv2d(1, out_chanel, kernel_size=3, padding=1),
             nn.PReLU()
         )
 
@@ -104,8 +104,12 @@ class HeadBlock(nn.Module):
         return block1
 
 class ToOutput(nn.Module):
-    def __init__(self,in_chan=32):
+    def __init__(self,in_chan=1):
         super(ToOutput, self).__init__()
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_chan, 64, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
         self.conv2 = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.PReLU()
@@ -119,45 +123,19 @@ class ToOutput(nn.Module):
             nn.PReLU()
         )
         self.conv5 = nn.Conv2d(64, 1, kernel_size=3, padding=1)
+        self.load_state_dict(torch.load("epochs_subrate_0.8_blocksize_32/net_epoch_45_0.000132.pth",map_location=torch.device('cuda:%d'%torch.cuda.current_device())), strict=False)
     
-    def forward(self,block1):
+    def forward(self,x):
+        block1 = self.conv1(x)
         block2 = self.conv2(block1)
         block3 = self.conv3(block2)
         block4 = self.conv4(block3)
         block5 = self.conv5(block4)
         return block5
 
-class Variance_estimation_block(nn.Module):
-    def __init__(self,mode="concate"):
-        super(Variance_estimation_block, self).__init__()
-        
-        self.fusion_block=HierarchicalBlock(mode=mode)
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.PReLU()
-        )
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.PReLU()
-        )
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.PReLU()
-        )
-        self.conv5 = nn.Conv2d(64, 1, kernel_size=3, padding=1)
-        self.eps = 1e-6
-    
-    def forward(self,x,y):
-        block1 = self.fusion_block(x,y)
-        block2 = self.conv2(block1)
-        block3 = self.conv3(block2)
-        block4 = self.conv4(block3)
-        block5 = self.conv5(block4)
-        return torch.log(1+torch.exp(block5))+self.eps
-
 
 class HierarchicalBlock(nn.Module):
-    def __init__(self,mode="concate"):
+    def __init__(self,mode="concate",in_chan=64):
         super(HierarchicalBlock, self).__init__()
         if mode == "concate":
             FusionBlock = Fusion_concate
@@ -171,17 +149,77 @@ class HierarchicalBlock(nn.Module):
             FusionBlock = Fusion_add_residual
 
         
-        self.fusion_block = FusionBlock()
+        self.fusion_block = FusionBlock(in_chan=in_chan)
     
     def forward(self,x,y):
         return self.fusion_block(x,y)
 
+class EstimationBlock(nn.Module):
+    def __init__(self, channels, has_BN = False):
+        super(EstimationBlock, self).__init__()
+        self.has_BN = has_BN
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        if has_BN:
+            self.bn1 = nn.BatchNorm2d(channels)
+        self.prelu = nn.PReLU()
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        if has_BN:
+            self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        residual = self.conv1(x)
+        if self.has_BN:
+            residual = self.bn1(residual)
+        residual = self.prelu(residual)
+        residual = self.conv2(residual)
+        if self.has_BN:
+            residual = self.bn2(residual)
+        return residual
+
+class EstimationBlock2(nn.Module):
+    def __init__(self,channels=1,filters=16):
+        super(EstimationBlock2, self).__init__()
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(channels, filters, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(filters, filters, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(filters, filters, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(filters, filters, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
+        self.conv5 = nn.Conv2d(filters, channels,kernel_size=3, padding=1)
+            
+    def forward(self,x):
+        block1 = self.conv1(x)
+        block2 = self.conv2(block1)
+        block3 = self.conv3(block2)
+        block4 = self.conv4(block3)
+        block5 = self.conv5(block4)
+        return block5
+
+class Encoder(nn.Module):
+    def __init__(self,channels=64,has_BN = True,filters=16):
+        super(Encoder, self).__init__()
+        self.to_mean = EstimationBlock2(channels=channels,filters=filters)
+        self.to_logvar = EstimationBlock2(channels=channels,filters=filters)
+    
+    def forward(self,x):
+        return self.to_mean(x),self.to_logvar(x)
+
 
 class Fusion_concate(nn.Module):
-    def __init__(self,in_chan=128,num_filters=64):
+    def __init__(self,in_chan=64):
         super(Fusion_concate, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_chan, num_filters, kernel_size=3, padding=1),
+            nn.Conv2d(in_chan*2, in_chan, kernel_size=3, padding=1),
             nn.PReLU()
         )
 
@@ -270,7 +308,7 @@ class Fusion_spade_residual(nn.Module):
 
 #  code of CSNet
 class HierarchicalCSNet(nn.Module):
-    def __init__(self, blocksize=32, subrate=0.1, group_num=8,mode="concate",shared_head=False,shared_tail=False,variance_estimation=False):
+    def __init__(self, blocksize=32, subrate=0.1, group_num=8,filters=16,mode="concate",shared_head=False,shared_tail=True,variance_estimation=False,z_channel=16,fitdecoder=True):
 
         super(HierarchicalCSNet, self).__init__()
         self.blocksize = blocksize
@@ -284,38 +322,48 @@ class HierarchicalCSNet(nn.Module):
             for m in range(group_num):
                 headblock = HeadBlock(
                     sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),
-                    out_channel = blocksize*blocksize,
-                    blocksize = blocksize
+                    sample_out_channel = blocksize*blocksize,
+                    blocksize = blocksize,
+                    out_chanel= z_channel
                 )
                 self.add_module(f'head_{str(m)}', headblock)
         else:
             headblock = HeadBlock(
                     sample_channel=int(np.round(blocksize*blocksize*subrate/group_num)),
-                    out_channel = blocksize*blocksize,
-                    blocksize = blocksize
+                    sample_out_channel = blocksize*blocksize,
+                    blocksize = blocksize,
+                    out_chanel= z_channel
                 )
             for m in range(group_num):
                 self.add_module(f'head_{str(m)}', headblock)
         
 
         for m in range(group_num-1):
-            hierarchicalblock = HierarchicalBlock(mode=mode)
+            hierarchicalblock = HierarchicalBlock(mode=mode,in_chan=z_channel)
             self.add_module(f'hierarchicalblock_{str(m)}', hierarchicalblock)
 
         self.variance_estimation = variance_estimation
-        if variance_estimation == True:
-            for m in range(group_num-1):
-                varianceestimationblock = Variance_estimation_block(mode=mode)
-                self.add_module(f'varianceestimationblock_{str(m)}', varianceestimationblock)
+        for m in range(group_num):
+            encoder = Encoder(channels=z_channel,filters=filters)
+            self.add_module(f'encoder_{str(m)}', encoder)
         
+
         if shared_tail == False:
             for m in range(group_num):
-                tailblock = ToOutput()
+                tailblock = ToOutput(in_chan=z_channel)
+                if fitdecoder == True:
+                    for i in tailblock.parameters():
+                        i.requires_grad=False
                 self.add_module(f'tail_{str(m)}', tailblock)
         else:
-            tailblock = ToOutput()
+            tailblock = ToOutput(in_chan=z_channel)
+            if fitdecoder == True:
+                for i in tailblock.parameters():
+                    i.requires_grad=False
             for m in range(group_num):
                 self.add_module(f'tail_{str(m)}', tailblock)
+
+
 
 
     def forward(self, x):
@@ -325,45 +373,42 @@ class HierarchicalCSNet(nn.Module):
             headlist.append(getattr(self, f'head_{str(m)}')(y[m]))
 
         resultlist = []
-        x = headlist[0]
-        resultlist.append(getattr(self, f'tail_{str(0)}')(x))
-
         if self.variance_estimation == True:
-            variance_estimation_list = []
+            sampling_result = []
+            latent_list = []
 
+        x = headlist[0]
+        x,log_var =  getattr(self, f'encoder_{str(0)}')(x)
+        resultlist.append(self.get_output(getattr(self, f'tail_{str(0)}'),x))
+        
+        if self.variance_estimation == True:
+            latent_sampling = self.reparameterize(x,log_var)
+            sampling_result.append(self.get_output(getattr(self, f'tail_{str(0)}'),latent_sampling))
+            latent_list.append((x,log_var))
+            
         for m in range(self.group_num-1):
             x = getattr(self, f'hierarchicalblock_{str(m)}')(x,headlist[m+1])
+            x,log_var =  getattr(self, f'encoder_{str(m+1)}')(x)
+            resultlist.append(self.get_output(getattr(self, f'tail_{str(m)}'),x))
             if self.variance_estimation == True:
-                variance_estimation_list.append(getattr(self, f'varianceestimationblock_{str(m)}')(x,headlist[m+1]))
-            resultlist.append(getattr(self, f'tail_{str(m+1)}')(x))
+                latent_sampling = self.reparameterize(x,log_var)
+                sampling_result.append(self.get_output(getattr(self, f'tail_{str(m)}'),latent_sampling))
+                latent_list.append((x,log_var))
 
         if self.variance_estimation == True:
-            return resultlist, variance_estimation_list
+            return resultlist, sampling_result,latent_list
         else:
             return resultlist
 
-
-# The residualblock for reconstruction network
-class ResidualBlock(nn.Module):
-    def __init__(self, channels, has_BN = False):
-        super(ResidualBlock, self).__init__()
-        self.has_BN = has_BN
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        if has_BN:
-            self.bn1 = nn.BatchNorm2d(channels)
-        self.prelu = nn.PReLU()
-        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-        if has_BN:
-            self.bn2 = nn.BatchNorm2d(channels)
-
-    def forward(self, x):
-        residual = self.conv1(x)
-        if self.has_BN:
-            residual = self.bn1(residual)
-        residual = self.prelu(residual)
-        residual = self.conv2(residual)
-        if self.has_BN:
-            residual = self.bn2(residual)
-
-        return x + residual
+    def reparameterize(self, mu, log_var):
+        std = log_var.mul(0.5).exp_()
+        eps = torch.FloatTensor(std.size()).normal_()
+        if torch.cuda.is_available():
+            eps = Variable(eps.cuda())
+        else:
+            eps = Variable(eps)
+        return eps.mul(std).add_(mu)
+    
+    def get_output(self,model,latent):
+        return model(latent)
 

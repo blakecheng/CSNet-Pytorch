@@ -37,7 +37,7 @@ PRE_EPOCHS = opt.pre_epochs
 LOAD_EPOCH = 0
 
 
-train_set = TrainDatasetFromFolder('/home/chengbin/data/images/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
+train_set = TrainDatasetFromFolder('data/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
 train_loader = DataLoader(dataset=train_set, num_workers=4, batch_size=opt.batchSize, shuffle=True)
 
 net = CSNet(BLOCK_SIZE, opt.sub_rate)

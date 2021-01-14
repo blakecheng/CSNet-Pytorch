@@ -74,39 +74,48 @@ class VIDLoss(nn.Module):
         self.group_num = group_num
         self.weight = weight
         self.weights = [2*(i+1)/float(group_num*(group_num+1)) for i in range(group_num)]
+        self.eps = 1e-6
     
     def forward(self,fake_imgs,real_img):
-        batchsize = real_img.shape[0]
+        batchsize,c,w,h = real_img.shape
         resultlist, latentlist = fake_imgs
 
-        if self.mode == "normal":
-            mseloss = self.mse(resultlist[-1],real_img)
-            idloss = 0
-            for result, latent in zip(resultlist,latentlist):
-                mu,logvar = latent
-                kldloss = self.compute_kld(mu,logvar)/batchsize
-                idloss += (kldloss+self.mse(result,real_img))
-                mseloss += self.weights*self.mse(result,real_img)
-            return mseloss+self.weight*idloss,mseloss,idloss
-        elif self.mode == "id":
+        # if self.mode == "normal":
+        #     mseloss = self.mse(resultlist[-1],real_img)
+        #     idloss = 0
+        #     for result, latent in zip(resultlist,latentlist):
+        #         mu,logvar = latent
+        #         kldloss = self.compute_kld(mu,logvar)/batchsize
+        #         idloss += (kldloss+self.mse(result,real_img))
+        #         mseloss += self.weights*self.mse(result,real_img)
+        #     return mseloss+self.weight*idloss,mseloss,idloss
+        if self.mode == "id":
             mseloss = self.weights[-1]*self.mse(resultlist[-1],real_img)
-            mu_t,logvar_t=sum([latent[0] for latent in latentlist]),sum([latent[1] for latent in latentlist])
             idloss = 0
-            mu,logvar = 0,0
+            for i in range(self.group_num-1):
+                mseloss += self.weights[i]*self.mse(resultlist[i],real_img)
+                return mseloss,mseloss,mseloss
+        elif self.mode == "id_vae":
+            mseloss = self.weights[-1]*self.mse(resultlist[-1],real_img)
+            mu_t,logvar_t=sum([latent[0] for latent in latentlist]),sum([latent[1].exp() for latent in latentlist]).log()
+            idloss = 0
+            mu,var = 0,0
             for i in range(self.group_num-1):
                 mu += latentlist[i][0]
-                logvar += latentlist[i][1]
-                idloss += self.compute_kld2(mu,logvar,mu_t,logvar_t)/batchsize
-                mseloss += 0.5*self.mse(resultlist[i],real_img)
+                var += latentlist[i][1].exp()
+                logvar = var.log()+ self.eps
+                idloss += self.weights[i]*self.compute_kld2(mu,logvar,torch.zeros_like(mu_t),torch.ones_like(logvar_t)+torch.log(torch.tensor([1e-4]).cuda()))/(batchsize*c*w*h)
+                mseloss += self.weights[i]*self.mse(resultlist[i],real_img)
                 return mseloss+self.weight*idloss,mseloss,idloss
-        elif self.mode == "id2":
+        elif self.mode == "id_teacher":
             mseloss = self.mse(resultlist[-1],real_img)
-            mu_t,logvar_t=latentlist[-1]
-            idloss = 0
-            for i in range(self.group_num-1):
-                mu,logvar = latentlist[i]
-                idloss += self.compute_kld2(mu,logvar,mu_t.detach(),logvar_t.detach())/batchsize
-                return mseloss+self.weight*idloss,mseloss,idloss
+            return mseloss,mseloss,mseloss
+        elif self.mode == "id_teacher_vae":
+            mseloss = self.mse(resultlist[-1],real_img)
+            mu_t,logvar_t=sum([latent[0] for latent in latentlist]),sum([latent[1].exp() for latent in latentlist]).log()+self.eps
+            idloss = self.compute_kld2(mu_t,logvar_t,torch.zeros_like(mu_t),torch.ones_like(logvar_t)+torch.log(torch.tensor([1e-4]).cuda()))/(batchsize*c*w*h)
+            return mseloss+self.weight*idloss,mseloss,idloss
+
 
     def compute_kld(self,mu,logvar):
         KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
@@ -155,7 +164,8 @@ for epoch in range(LOAD_EPOCH, NUM_EPOCHS + 1):
             z = z.cuda()
         fake_img = net(z)
         optimizer.zero_grad()
-        g_loss,mseloss,idloss = criterion(fake_img, real_img)
+        with torch.autograd.set_detect_anomaly(True):
+            g_loss,mseloss,idloss = criterion(fake_img, real_img)
 
         g_loss.backward()
         optimizer.step()

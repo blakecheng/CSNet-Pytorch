@@ -88,14 +88,19 @@ class SamplingModule(nn.Module):
         return samplelist
 
 class HeadBlock(nn.Module):
-    def __init__(self,sample_channel,out_channel,blocksize):
+    def __init__(self,sample_channel,sample_out_channel,blocksize,out_channel):
         super(HeadBlock, self).__init__()
         self.blocksize = blocksize
-        self.upsampling = nn.Conv2d(sample_channel, out_channel, 1, stride=1, padding=0)
+        self.upsampling = nn.Conv2d(sample_channel, sample_out_channel, 1, stride=1, padding=0)
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(1, out_channel, kernel_size=3, padding=1),
+            nn.PReLU()
+        )
 
     def forward(self,x):
         x = self.upsampling(x)
         x = My_Reshape_Adap(x, self.blocksize)
+        x = self.conv1(x)
         return x
 
 
@@ -237,10 +242,10 @@ class Fusion_spade_residual(nn.Module):
         return torch.add(res, identity_map)
 
 class EstimationBlock(nn.Module):
-    def __init__(self, channels, in_chan =1, has_BN = False):
+    def __init__(self, channels, has_BN = False):
         super(EstimationBlock, self).__init__()
         self.initblock = nn.Sequential(
-            nn.Conv2d(in_chan, channels, kernel_size=7, padding=3),
+            nn.Conv2d(channels, channels, kernel_size=7, padding=3),
             nn.PReLU()
         )
         self.has_BN = has_BN
@@ -318,26 +323,35 @@ class VariationHierarchicalCSNet(nn.Module):
             for m in range(group_num):
                 self.add_module(f'tail_{str(m)}', tailblock)
 
-    def forward(self, x):
+        self.variance = 1e-4
+
+    def forward(self, x ,mode="id"):
         y = self.sampling(x)
         headlist = []
         for m in range(self.group_num):
             headlist.append(getattr(self, f'head_{str(m)}')(y[m]))
 
-
         resultlist = []
         latentlist = []
         x = headlist[0]
-        mu, log_var = getattr(self, f'encoder_{str(0)}')(x)
+        x = getattr(self, f'hierarchicalblock_{str(0)}')(x)
+        x, log_var = getattr(self, f'encoder_{str(0)}')(x)
         latentlist.append([mu, log_var])
-        z = self.reparameterize(mu, log_var)
+        if "vae" in mode:
+            z = self.reparameterize(x, log_var)
+        else:
+            z = x
         resultlist.append(getattr(self, f'tail_{str(0)}')(z))
 
         for m in range(self.group_num-1):
             mu, log_var = getattr(self, f'encoder_{str(m+1)}')(headlist[m+1])
             latentlist.append([mu, log_var])
-            z_tmp = self.reparameterize(mu, log_var)
-            z = getattr(self, f'hierarchicalblock_{str(m)}')(z,z_tmp)
+            mu_s = mu_s+mu
+            var_s = var_s+log_var.exp()
+            if "vae" in mode:
+                z = self.reparameterize(mu_s, var_s.log())
+            else:
+                z = mu_s
             resultlist.append(getattr(self, f'tail_{str(m+1)}')(z))
 
         return resultlist, latentlist

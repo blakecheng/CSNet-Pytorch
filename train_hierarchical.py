@@ -29,10 +29,12 @@ parser.add_argument('--sub_rate', default=0.8, type=float, help='sampling sub ra
 parser.add_argument('--loadEpoch', default=0, type=int, help='load epoch number')
 parser.add_argument('--generatorWeights', type=str, default='', help="path to CSNet weights (to continue training)")
 
-parser.add_argument('--group_num', type=int, default=5, help="path to CSNet weights (to continue training)")
+parser.add_argument('--group_num', type=int, default=8, help="path to CSNet weights (to continue training)")
 parser.add_argument('--loss_mode', type=str, default='normal', help="path to CSNet weights (to continue training)")
 parser.add_argument('--fusion_mode',type=str, default='concate', help="path to CSNet weights (to continue training)")
+parser.add_argument('--zc',type=int, default=1)
 
+parser.add_argument('--weight',type=float,default=0.0)
 
 
 
@@ -57,12 +59,16 @@ for arg in argv:
         save_dir = save_dir+"_l%s"%(opt.loss_mode)
     if arg in "--fusion_mode":
         save_dir = save_dir+"_%s"%(opt.fusion_mode)
+    if arg in "--zc":
+        save_dir = save_dir+"_zc%d"%(opt.zc)
+    if arg in "--weight":
+        save_dir = save_dir+"_weight%d"%(opt.zc)
 
 train_set = TrainDatasetFromFolder('data/train_crop', crop_size=CROP_SIZE, blocksize=BLOCK_SIZE)
 train_loader = DataLoader(dataset=train_set, num_workers=16, batch_size=opt.batchSize, shuffle=True)
 
-use_variance_estimation = ("id_variance" in opt.loss_mode)
-net = HierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mode=FUSION_MODE,variance_estimation=use_variance_estimation)
+use_variance_estimation = True
+net = HierarchicalCSNet(BLOCK_SIZE, opt.sub_rate,group_num=GROUP_NUM,mode=FUSION_MODE,variance_estimation=use_variance_estimation,z_channel=opt.zc)
 
 class MSELoss(nn.Module):
     def __init__(self,mode="normal",group_num=8):
@@ -87,25 +93,32 @@ class MSELoss(nn.Module):
             for i in range(self.group_num-1):
                 loss += self.weights[i]*self.mse(fake_imgs[i],fake_imgs[i+1].detach())
         elif self.mode == "id_variance":
-            result, variance = fake_imgs
+            result, sampling_result, latent_list = fake_imgs
             loss = self.weights[-1]*self.mse(result[-1],real_img)
             distortion = loss.clone()
             for i in range(self.group_num-1):
-                loss += 1e-2*self.weights[i]*(self.mse(0.5*result[i]/variance[i],0.5*real_img.detach()/variance[i])+ 0.5*torch.mean(torch.log(variance[i])))
-            print(loss-distortion,distortion)
-        elif self.mode == "id_variance2":
-            result, variance = fake_imgs
-            loss = self.weights[-1]*self.mse(result[-1],real_img)
-            distortion = loss.clone()
-            for i in range(self.group_num-1):
-                loss += 1e-4*self.weights[i]*(self.mse(0.5*result[i]/variance[i],0.5*result[i+1].detach()/variance[i])+ 0.5*torch.mean(torch.log(variance[i])))
-            print(loss-distortion,distortion)
+                mu,log_var = latent_list[i]
+                loss += self.weights[i]*(self.mse(result[i],real_img)) + self.mse(mu,latent_list[-1][0]) 
+                loss += opt.weight*self.compute_kld2(mu,log_var,latent_list[-1][0],torch.log(torch.tensor([1e-6]).cuda()))
+        elif self.mode == "id_variance_teacher":
+            result, sampling_result, latent_list = fake_imgs
+            # mu,log_var = latent_list[-1]
+            # loss = self.weights[-1]*(self.mse(result[-1],real_img)+ 0.1*self.mse(sampling_result[-1],real_img))
+            # loss += opt.weight*self.compute_kld2(mu,log_var,torch.zeros_like(mu),torch.log(torch.tensor([1e-4]).cuda()))
+            loss = self.mse(sampling_result[-1],real_img)
+        elif self.mode == "id_variance_teacher_fix":
+            result, sampling_result, latent_list = fake_imgs
+            loss = self.mse(result[-1],real_img)
         else:
             loss = 0
             for weight, fake_img in zip(self.weights,fake_imgs):
                 loss += weight*self.mse(fake_img,real_img)
         
         return loss
+
+    def compute_kld2(self,mu1,logvar1,mu2,logvar2):
+        KLD = - 0.5 * torch.sum(logvar1-logvar2 -(logvar1.exp()+(mu1-mu2).pow(2))/logvar2.exp()+1)
+        return KLD
 
 mse_loss = MSELoss(mode=LOSS_MODE,group_num=GROUP_NUM)
 
@@ -117,7 +130,10 @@ if torch.cuda.is_available():
     net.cuda()
     mse_loss.cuda()
 
-optimizer = optim.Adam(net.parameters(), lr=0.0004, betas=(0.9, 0.999))
+if "id_variance_teacher" in LOSS_MODE:
+    optimizer = optim.Adam(net.parameters(), lr=0.0004, betas=(0.9, 0.999))
+else:
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=0.0004, betas=(0.9, 0.999))
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
 
 
@@ -159,6 +175,7 @@ for epoch in range(LOAD_EPOCH, NUM_EPOCHS + 1):
 
     if epoch % 1 == 0:
         save_name = save_dir + '/net_epoch_%d_%6f.pth' % (epoch, running_results['g_loss']/running_results['batch_sizes'])
+        print("save to : ",save_name)
         torch.save(net.state_dict(), save_name)
         torch.save(opt, save_dir+"/opt.pt")
         os.system("python test_h.py --model %s"%(save_name))
